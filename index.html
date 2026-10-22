@@ -169,6 +169,7 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
   <div class="spacer"></div>
   <div class="menu">
     <button class="btn primary big" data-go="play">▶&nbsp; PLAY GAME</button>
+    <button class="btn gold" data-play="-1">∞ ENDLESS MODE</button>
     <div class="grid2">
       <button class="btn" data-go="levels">🗺️ SELECT LEVEL</button>
       <button class="btn" data-go="chars">🧑‍🚀 CHARACTERS</button>
@@ -770,6 +771,19 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     id: i + 1, name: a[0], boss: !!a[1], top: a[2], bot: a[3], n1: a[4], n2: a[5], rail: a[6], accent: a[7], planets: a[8],
     len: 420 + i * 95 + (a[1] ? 60 : 0), spd: 15 + i * 1.35, diff: i / 9, bossHp: i === 4 ? 26 : 44,
   }));
+  // levels never end: after 10 the themes repeat with longer, faster, harder tracks
+  GA.getLevel = function (n) {
+    if (n <= 10) return GA.LEVELS[n - 1];
+    const b = GA.LEVELS[(n - 1) % 10], loop = Math.floor((n - 1) / 10);
+    return Object.assign({}, b, {
+      id: n, name: b.name + (loop ? ' ' + (loop + 1) : ''), len: Math.min(1500, 420 + (n - 1) * 60 + (b.boss ? 60 : 0)),
+      spd: Math.min(34, 15 + (n - 1) * 0.9), diff: Math.min(1, 0.55 + (n - 1) * 0.02), bossHp: b.bossHp + loop * 10,
+    });
+  };
+  GA.makeEndless = function () {
+    return Object.assign({}, GA.LEVELS[0], { id: '∞', name: 'Endless', endless: true, boss: false, len: 1e9, spd: 14, diff: 0.15, bossHp: 0 });
+  };
+  GA.SPEEDS = [{ n: 'Chill', m: 0.85, ico: '🐢' }, { n: 'Normal', m: 1, ico: '🚀' }, { n: 'Fast', m: 1.25, ico: '⚡' }, { n: 'Turbo', m: 1.5, ico: '🔥' }];
   GA.TUTORIAL = {
     id: 0, name: 'Tutorial', tutorial: true, boss: false, top: '#1d1259', bot: '#06031a', n1: '#6a4cff', n2: '#18c0ff', rail: '#4de3ff', accent: '#ff4fd8',
     planets: ['#ff7a59', '#4de3ff', '#b066ff'], len: 270, spd: 12, diff: 0,
@@ -809,7 +823,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
       coins: 0, gems: 0, unlocked: 1, tutorialDone: false, best: {}, stars: {}, chars: ['astro'], sel: 'astro', outfits: ['classic'], outfit: 'classic',
       up: { hp: 0, pow: 0, mag: 0 }, ach: {}, daily: { last: '', streak: 0 },
       stat: { totalCoins: 0, kills: 0, bosses: 0, secrets: 0, perfect: 0, buys: 0, runs: 0 },
-      set: { music: true, sfx: true, vibrate: true, quality: 'high' },
+      set: { music: true, sfx: true, vibrate: true, quality: 'high', speed: 1 },
     };
   }
   let S = defaults();
@@ -902,13 +916,13 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
 
   /* ---------- run setup ---------- */
   G.start = function (idx) {
-    const lv = idx === 0 ? GA.TUTORIAL : GA.LEVELS[idx - 1];
+    const lv = idx === 0 ? GA.TUTORIAL : idx === -1 ? GA.makeEndless() : GA.getLevel(idx);
     // keep the camera continuous with the menu: re-base world coordinates so the runner is at z=0
     const c = GE.cam; if (c.tx !== undefined) { c.z += G.menuDist; c.tz += G.menuDist; }
-    G.level = lv; G.lvIdx = idx; setTheme(lv);
+    G.level = lv; G.lvIdx = idx; G.zone = 0; setTheme(lv);
     G.rnd = mulberry((Math.random() * 1e9) | 0);
     G.items = []; G.bullets = []; G.decor = []; G.boss = null; G.bossPending = false;
-    G.dist = 0; G.speed = lv.spd; G.score = 0; G.runCoins = 0; G.runGems = 0; G.kills = 0; G.hits = 0; G.combo = 0; G.comboT = 0; G.coinFrac = 0;
+    G.dist = 0; G.speed = lv.spd * (lv.tutorial ? 1 : GA.SPEEDS[S.set.speed === undefined ? 1 : S.set.speed].m); G.score = 0; G.runCoins = 0; G.runGems = 0; G.kills = 0; G.hits = 0; G.combo = 0; G.comboT = 0; G.coinFrac = 0;
     G.spawnD = 48; G.decorD = -25; G.sincePU = 0; G.bonusT = 0; G.bonusCoins = 0; G.shake = 0; G.banked = false; G.endT = 0; G.hitFlash = 0;
     G.portalDone = lv.tutorial; G.portalAt = lv.tutorial ? 1e9 : lv.len * (0.28 + rnd() * 0.35);
     const ch = curChar();
@@ -1093,7 +1107,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     if (lv.tutorial) S.tutorialDone = true;
     else {
       if (stars > (S.stars[idx] || 0)) S.stars[idx] = stars;
-      S.unlocked = Math.max(S.unlocked, Math.min(10, idx + 1));
+      S.unlocked = Math.max(S.unlocked, idx + 1);
       if (G.hits === 0) S.stat.perfect++;
       if (lv.boss) { S.stat.bosses++; S.gems += 3; G.runGems += 0; }
     }
@@ -1150,7 +1164,19 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     const lv = G.level;
     G.t += dt;
     const prog = clamp(G.dist / lv.len, 0, 1);
-    let target = lv.spd * (1 + 0.12 * prog);
+    const sm = lv.tutorial ? 1 : GA.SPEEDS[S.set.speed === undefined ? 1 : S.set.speed].m;
+    let target = lv.spd * (1 + 0.12 * prog) * sm;
+    if (lv.endless) { // endless: a new speed level + new galaxy every 500 m
+      const zone = Math.floor(G.dist / 500);
+      if (zone !== G.zone) {
+        G.zone = zone; const t = GA.LEVELS[zone % 10];
+        ['top', 'bot', 'n1', 'n2', 'rail', 'accent', 'planets'].forEach((k) => (lv[k] = t[k]));
+        setTheme(lv); SFX.play('warp'); H.banner('⚡ SPEED LEVEL ' + (zone + 1), 2200); H.flash('power');
+      }
+      lv.diff = Math.min(1, 0.15 + G.dist / 3500);
+      target = (14 + Math.min(G.zone, 16) * 2.1) * sm;
+    }
+    target = Math.min(target, 40); // keep it playable even on Turbo
     if (P.speedT > 0) target *= 1.55;
     if (G.bonusT > 0) target *= 1.3;
     G.speed += (target - G.speed) * Math.min(1, dt * 3);
@@ -1594,11 +1620,12 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     if (s !== hc.hp) { $('#hp').innerHTML = s; hc.hp = s; }
     const sc = fmt(G.score); if (sc !== hc.score) { $('#score').textContent = sc; hc.score = sc; }
     const co = '🪙 ' + fmt(G.runCoins); if (co !== hc.coins) { $('#hud-coins').textContent = co; hc.coins = co; }
-    if (G.level.name !== hc.name) { $('#lvname').textContent = (G.level.tutorial ? 'TUTORIAL' : 'LEVEL ' + G.level.id + ' · ' + G.level.name.toUpperCase()); hc.name = G.level.name; }
+    const nm = G.level.endless ? '∞ SPEED LV ' + (G.zone + 1) + ' · ' + fmt(G.dist) + 'm' : G.level.name;
+    if (nm !== hc.name) { $('#lvname').textContent = G.level.endless ? nm.toUpperCase() : (G.level.tutorial ? 'TUTORIAL' : 'LEVEL ' + G.level.id + ' · ' + G.level.name.toUpperCase()); hc.name = nm; }
     const pw = (ico, t, max, c) => (t > 0 ? '<div class="pw">' + ico + '<i style="width:' + Math.round((t / max) * 46) + 'px;background:' + c + '"></i></div>' : '');
     const pws = pw('⚡', P.speedT, 5, '#ffe14d') + pw('🛡️', P.shield, 9, '#38d6ff') + pw('✖2', P.dblT, 10, '#ffb020') + (G.bonusT > 0 ? pw('🌀', G.bonusT, 4.2, '#b066ff') : '');
     if (pws !== hc.pws) { $('#pws').innerHTML = pws; hc.pws = pws; }
-    const pr = Math.round(Math.min(1, G.dist / G.level.len) * 100) + '%'; if (pr !== hc.prog) { $('#prog').style.width = pr; hc.prog = pr; }
+    const pr = Math.round((G.level.endless ? (G.dist % 500) / 500 : Math.min(1, G.dist / G.level.len)) * 100) + '%'; if (pr !== hc.prog) { $('#prog').style.width = pr; hc.prog = pr; }
     if (G.boss) { const b = Math.round((G.boss.hp / G.boss.max) * 100) + '%'; if (b !== hc.boss) { $('#bossfill').style.width = b; hc.boss = b; } }
   };
 
@@ -1614,7 +1641,9 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
 
   /* ---------- levels ---------- */
   function renderLevels() {
-    const cards = GA.LEVELS.map((lv) => {
+    const shown = Math.max(10, S.unlocked + 2), arr = [];
+    for (let i = 1; i <= shown; i++) arr.push(GA.getLevel(i));
+    const cards = arr.map((lv) => {
       const locked = lv.id > S.unlocked, st = S.stars[lv.id] || 0;
       return '<button class="lv ' + (locked ? 'locked' : '') + '" data-play="' + lv.id + '" style="background:linear-gradient(160deg,' + lv.n1 + ',' + lv.top + ' 60%,' + lv.bot + ')">' +
         (lv.boss ? '<span class="tag">BOSS</span>' : '') + '<div class="n">' + (locked ? '🔒' : lv.id) + '</div><div class="nm">' + lv.name + '</div>' +
@@ -1623,9 +1652,13 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     }).join('');
     $('#s-levels').innerHTML = '<div class="ctop"><button class="icon-btn" data-go="home">⬅</button><h2>Select Level</h2><div class="chip">🪙 ' + fmt(S.coins) + '</div></div>' +
       '<div class="wrap" style="margin-top:12px"><div class="scroll">' +
-      '<button class="btn alt" data-play="0">🎓 TUTORIAL ' + (S.tutorialDone ? '✓' : '') + '</button><div class="levels">' + cards + '</div></div></div>';
+      speedRow() + '<button class="btn gold" data-play="-1">∞ ENDLESS MODE' + (S.best[-1] ? ' · Best ' + fmt(S.best[-1]) : '') + '</button><button class="btn alt" data-play="0">🎓 TUTORIAL ' + (S.tutorialDone ? '✓' : '') + '</button><div class="levels">' + cards + '</div></div></div>';
   }
 
+  function speedRow() {
+    return '<div class="sub" style="margin:0">Speed: ' + GA.SPEEDS[S.set.speed].ico + ' ' + GA.SPEEDS[S.set.speed].n + '</div><div class="tabs">' +
+      GA.SPEEDS.map((s, i) => '<button class="btn ' + (S.set.speed === i ? 'on' : '') + '" data-spd="' + i + '">' + s.ico + '<br>' + s.n + '</button>').join('') + '</div>';
+  }
   /* ---------- characters ---------- */
   let charIdx = 0;
   function renderChars() {
@@ -1710,13 +1743,13 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
   /* ---------- end screens ---------- */
   H.over = function () {
     const best = S.best[G.lvIdx] || 0;
-    $('#s-over').innerHTML = '<div class="panel center"><h2 style="color:var(--bad)">💥 GAME OVER</h2><div class="sub">' + (G.level.tutorial ? 'Tutorial' : 'Level ' + G.level.id + ' · ' + G.level.name) + '</div>' +
-      '<div class="stats"><div><b>' + fmt(G.score) + '</b><small>Score</small></div><div><b>' + fmt(best) + '</b><small>Best</small></div><div><b>🪙 ' + fmt(G.runCoins) + '</b><small>Coins</small></div><div><b>' + Math.round(Math.min(1, G.dist / G.level.len) * 100) + '%</b><small>Progress</small></div></div>' +
+    $('#s-over').innerHTML = '<div class="panel center"><h2 style="color:var(--bad)">💥 GAME OVER</h2><div class="sub">' + (G.level.endless ? '∞ Endless · Speed level ' + (G.zone + 1) : G.level.tutorial ? 'Tutorial' : 'Level ' + G.level.id + ' · ' + G.level.name) + '</div>' +
+      '<div class="stats"><div><b>' + fmt(G.score) + '</b><small>Score</small></div><div><b>' + fmt(best) + '</b><small>Best</small></div><div><b>🪙 ' + fmt(G.runCoins) + '</b><small>Coins</small></div><div><b>' + (G.level.endless ? fmt(G.dist) + ' m' : Math.round(Math.min(1, G.dist / G.level.len) * 100) + '%') + '</b><small>' + (G.level.endless ? 'Distance' : 'Progress') + '</small></div></div>' +
       '<button class="btn primary" data-act="retry">🔄 TRY AGAIN</button><div class="grid2"><button class="btn" data-go="levels">🗺️ LEVELS</button><button class="btn" data-go="shop">🛒 SHOP</button></div><button class="btn ghost" data-go="home">🏠 HOME</button></div>';
     show('over'); H.state();
   };
   H.complete = function (info) {
-    const lv = info.level, last = lv.id === 10, next = !lv.tutorial && !last;
+    const lv = info.level, last = false, next = !lv.tutorial;
     $('#s-complete').innerHTML = '<div class="panel center"><h2 style="color:var(--ok)">🏁 ' + (lv.tutorial ? 'TUTORIAL COMPLETE' : 'LEVEL COMPLETE') + '</h2><div class="sub">' + lv.name + '</div>' +
       (lv.tutorial ? '' : '<div class="bigstars">' + '<i>★</i>'.repeat(info.stars) + '<i style="opacity:.25">★</i>'.repeat(3 - info.stars) + '</div>') +
       '<div class="stats"><div><b>' + fmt(G.score) + '</b><small>Score</small></div><div><b>🪙 ' + fmt(G.runCoins) + '</b><small>Coins</small></div><div><b>+' + fmt(info.bonus) + '</b><small>Level bonus 🪙</small></div><div><b>' + G.kills + '</b><small>Enemies</small></div></div>' +
@@ -1754,7 +1787,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
       SFX.play('click');
       switch (d.go) {
         case 'home': goHome(); break;
-        case 'play': play(S.tutorialDone ? Math.min(S.unlocked, 10) : 0); break;
+        case 'play': play(S.tutorialDone ? S.unlocked : 0); break;
         case 'levels': renderLevels(); show('levels'); break;
         case 'chars': charIdx = Math.max(0, GA.CHARS.findIndex((c) => c.id === S.sel)); renderChars(); show('chars'); break;
         case 'shop': renderShop(); show('shop'); break;
@@ -1788,6 +1821,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
       if (d.set === 'music') SFX.setMusic(S.set.music); if (d.set === 'sfx') SFX.setSfx(S.set.sfx);
       GA.save(); SFX.play('click'); renderSettings(); return;
     }
+    if (d.spd !== undefined) { S.set.speed = parseInt(d.spd, 10); GA.save(); SFX.play('click'); renderLevels(); return; }
     if (d.q) { S.set.quality = d.q; GA.save(); applyQuality(); SFX.play('click'); renderSettings(); return; }
     if (d.reset !== undefined) {
       if (!resetArm) { resetArm = true; renderSettings(); setTimeout(() => { resetArm = false; }, 4000); return; }
@@ -1830,7 +1864,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
     G.bank();
     G.state = 'menu'; G.view = 'home'; G.menuDist = G.dist; G.items = []; G.bullets = []; G.boss = null;
     G.decorD = Math.max(G.decorD, G.dist - 20);
-    G.setTheme(GA.LEVELS[Math.min(S.unlocked, 10) - 1]);
+    G.setTheme(GA.getLevel(S.unlocked));
     SFX.mode('menu'); H.boss(false);
   };
 
@@ -1840,7 +1874,7 @@ void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; float a=clamp(1.0-
   if (!ok) { $('#nogl').classList.remove('hidden'); return; }
   SFX.state.sfx = S.set.sfx; SFX.state.music = S.set.music;
   applyQuality();
-  G.setTheme(GA.LEVELS[Math.min(S.unlocked, 10) - 1]);
+  G.setTheme(GA.getLevel(S.unlocked));
   G.view = 'home'; homeCounters(); show('home');
   SFX.mode('menu');
   if (GA.dailyReady()) setTimeout(() => { if (G.state === 'menu' && G.view === 'home') { renderDaily(); show('daily'); } }, 900);
